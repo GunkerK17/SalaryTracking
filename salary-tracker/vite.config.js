@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/SalaryTracking/', // Thêm chính xác dòng này vào
+  base: '/SalaryTracking/', // CỰC KỲ QUAN TRỌNG: Phải viết đúng hoa thường tên repo của bạn
 })

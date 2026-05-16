@@ -21,6 +21,8 @@ const getWeekBounds = () => {
   return [mon, sun];
 };
 
+const toUSDval = (val, cur, rate) => cur === "VND" ? toUSD(+val, rate) : +val;
+
 const MONTHS = ["Tháng 1","Tháng 2","Tháng 3","Tháng 4","Tháng 5","Tháng 6","Tháng 7","Tháng 8","Tháng 9","Tháng 10","Tháng 11","Tháng 12"];
 const DAYS_HDR = ["T2","T3","T4","T5","T6","T7","CN"];
 
@@ -129,10 +131,10 @@ const DatePicker = ({ value, onChange, t }) => {
           padding:14, boxShadow:"0 16px 48px rgba(0,0,0,0.18)"
         }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-            <button onClick={() => { viewM===0?setViewM(11)||setViewY(y=>y-1):setViewM(m=>m-1); }}
+            <button onClick={() => { viewM===0?(setViewM(11),setViewY(y=>y-1)):setViewM(m=>m-1); }}
               style={{ background:"none", border:"none", cursor:"pointer", color:t.textSub, padding:"4px 8px", borderRadius:8, fontSize:18 }}>‹</button>
             <span style={{ fontWeight:800, fontSize:13, color:t.text }}>{MONTHS[viewM]} {viewY}</span>
-            <button onClick={() => { viewM===11?setViewM(0)||setViewY(y=>y+1):setViewM(m=>m+1); }}
+            <button onClick={() => { viewM===11?(setViewM(0),setViewY(y=>y+1)):setViewM(m=>m+1); }}
               style={{ background:"none", border:"none", cursor:"pointer", color:t.textSub, padding:"4px 8px", borderRadius:8, fontSize:18 }}>›</button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:4 }}>
@@ -198,8 +200,206 @@ const AmountInput = ({ value, onChange, currency, err, t, placeholder="0.00" }) 
   </div>
 );
 
+// ─── Edit Modal ───────────────────────────────────────────────────────────────
+const EditModal = ({ item, rate, onSave, onClose, t }) => {
+  const [date, setDate] = useState(item.date);
+  const [wage, setWage] = useState(String(item.wageOrig ?? item.wageUSD));
+  const [wageCur, setWageCur] = useState(item.wageCur || "USD");
+  const [showTip, setShowTip] = useState((item.tipUSD || 0) > 0);
+  const [tip, setTip] = useState(String(item.tipOrig ?? item.tipUSD ?? ""));
+  const [tipCur, setTipCur] = useState(item.tipCur || "USD");
+  const [note, setNote] = useState(item.note || "");
+  const [err, setErr] = useState({});
+
+  const wageUSD = +wage > 0 ? toUSDval(wage, wageCur, rate) : 0;
+  const tipUSD = showTip && +tip > 0 ? toUSDval(tip, tipCur, rate) : 0;
+  const totalUSD = wageUSD + tipUSD;
+
+  const save = () => {
+    const errs = {};
+    if (!date) errs.date = "Chọn ngày";
+    if (!wage || isNaN(+wage) || +wage <= 0) errs.wage = "Nhập số tiền hợp lệ";
+    if (showTip && tip && (isNaN(+tip) || +tip < 0)) errs.tip = "Tip không hợp lệ";
+    if (Object.keys(errs).length) { setErr(errs); return; }
+    onSave({
+      ...item,
+      date,
+      wageUSD: toUSDval(wage, wageCur, rate),
+      wageCur, wageOrig: +wage,
+      tipUSD: showTip && +tip > 0 ? toUSDval(tip, tipCur, rate) : 0,
+      tipCur, tipOrig: tip ? +tip : 0,
+      totalUSD,
+      exchangeRate: rate,
+      note: note.trim(),
+    });
+  };
+
+  const lbl = { fontSize:11, fontWeight:700, color:t.textSub, display:"block", marginBottom:5, textTransform:"uppercase", letterSpacing:.4 };
+  const overlay = { position:"fixed", inset:0, background:"rgba(0,0,0,0.55)", zIndex:500, display:"flex", alignItems:"flex-end", justifyContent:"center", padding:"0 0 0 0" };
+
+  return (
+    <div style={overlay} onClick={e => e.target===e.currentTarget && onClose()}>
+      <div style={{
+        background:t.surface, borderRadius:"20px 20px 0 0", padding:"20px 16px 32px",
+        width:"100%", maxWidth:520, border:`1px solid ${t.border}`,
+        boxShadow:"0 -8px 40px rgba(0,0,0,0.25)", animation:"slideUp .25s ease",
+        maxHeight:"90vh", overflowY:"auto"
+      }}>
+        {/* Handle bar */}
+        <div style={{ width:40, height:4, background:t.border, borderRadius:4, margin:"0 auto 16px" }} />
+
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <h3 style={{ margin:0, fontSize:16, fontWeight:900, color:t.text, display:"flex", alignItems:"center", gap:8 }}>
+            <Icon name="edit" size={17} color={t.accent} />Chỉnh sửa thu nhập
+          </h3>
+          <button onClick={onClose} style={{ background:t.surfaceHover, border:`1px solid ${t.border}`, borderRadius:10, padding:"6px 8px", cursor:"pointer", color:t.textSub }}>
+            <Icon name="x" size={16} color={t.textSub} />
+          </button>
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:13 }}>
+          {/* Date */}
+          <div>
+            <label style={lbl}>Ngày làm việc</label>
+            <DatePicker value={date} onChange={setDate} t={t} />
+            {err.date && <p style={{ color:t.red, fontSize:12, margin:"4px 0 0" }}>{err.date}</p>}
+          </div>
+
+          {/* Wage */}
+          <div>
+            <label style={lbl}>Lương / Thu nhập</label>
+            <div style={{ display:"flex", gap:8 }}>
+              <div style={{ flex:1 }}>
+                <AmountInput value={wage} onChange={v=>{setWage(v);setErr(e=>({...e,wage:""}));}} currency={wageCur} err={err.wage} t={t} />
+              </div>
+              <CurrencyToggle value={wageCur} onChange={setWageCur} t={t} />
+            </div>
+            {err.wage && <p style={{ color:t.red, fontSize:12, margin:"4px 0 0" }}>{err.wage}</p>}
+            {wage && +wage > 0 && (
+              <p style={{ color:t.textMuted, fontSize:12, margin:"4px 0 0" }}>
+                ≈ {wageCur==="USD" ? fmtVND(toVND(+wage, rate)) : fmtUSD(toUSD(+wage, rate))}
+              </p>
+            )}
+          </div>
+
+          {/* Tip */}
+          <div>
+            <button onClick={()=>{setShowTip(s=>!s); setTip("");}} style={{
+              display:"flex", alignItems:"center", gap:8, border:`1.5px solid ${showTip?t.pink:t.border}`,
+              cursor:"pointer", color:showTip?t.pink:t.textSub, fontSize:13, fontWeight:700,
+              padding:"9px 14px", borderRadius:12, fontFamily:"inherit", width:"100%",
+              transition:"all .15s", justifyContent:"center",
+              background:showTip?t.pinkBg:"transparent"
+            }}>
+              <Icon name={showTip?"coin":"circle-plus"} size={15} color={showTip?t.pink:t.textMuted} />
+              {showTip ? "Ẩn ô tip" : "Thêm tiền tip (tùy chọn)"}
+            </button>
+            {showTip && (
+              <div style={{ marginTop:10, padding:"12px 14px", background:t.pinkBg, borderRadius:12, border:`1.5px solid ${t.pink}50` }}>
+                <label style={{ ...lbl, color:t.pink }}>Tiền tip nhận được</label>
+                <div style={{ display:"flex", gap:8 }}>
+                  <div style={{ flex:1 }}>
+                    <AmountInput value={tip} onChange={v=>{setTip(v);setErr(e=>({...e,tip:""}));}} currency={tipCur} err={err.tip} t={t} />
+                  </div>
+                  <CurrencyToggle value={tipCur} onChange={setTipCur} t={t} />
+                </div>
+                {err.tip && <p style={{ color:t.red, fontSize:12, margin:"4px 0 0" }}>{err.tip}</p>}
+                {tip && +tip > 0 && (
+                  <p style={{ color:t.pink, fontSize:12, margin:"4px 0 0", fontWeight:600 }}>
+                    ≈ {tipCur==="USD" ? fmtVND(toVND(+tip, rate)) : fmtUSD(toUSD(+tip, rate))}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Note */}
+          <div>
+            <label style={lbl}>Ghi chú</label>
+            <input type="text" placeholder="ca sáng, bonus, thêm giờ..." value={note}
+              onChange={e=>setNote(e.target.value)}
+              style={{ width:"100%", padding:"11px 14px", borderRadius:12, border:`1.5px solid ${t.border}`,
+                background:t.inputBg, color:t.text, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }} />
+          </div>
+
+          {/* Preview */}
+          {totalUSD > 0 && (
+            <div style={{ padding:"11px 14px", background:t.greenBg, borderRadius:12, border:`1.5px solid ${t.green}40`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontSize:12, color:t.greenTxt, fontWeight:700 }}>Tổng sau chỉnh sửa</span>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:16, fontWeight:900, color:t.green }}>{fmtUSD(totalUSD)}</div>
+                <div style={{ fontSize:11, color:t.greenTxt, fontWeight:600 }}>{fmtVND(toVND(totalUSD, rate))}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div style={{ display:"flex", gap:10, marginTop:4 }}>
+            <button onClick={onClose} style={{
+              flex:1, padding:"12px", background:t.surfaceHover, color:t.textSub,
+              border:`1.5px solid ${t.border}`, borderRadius:12, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit"
+            }}>Huỷ</button>
+            <button onClick={save} style={{
+              flex:2, padding:"12px", background:t.accent, color:"#fff",
+              border:"none", borderRadius:12, fontSize:14, fontWeight:800, cursor:"pointer",
+              display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontFamily:"inherit"
+            }}>
+              <Icon name="check" size={16} color="#fff" />Lưu thay đổi
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Income Card (shared between History & Calendar) ──────────────────────────
+const IncomeCard = ({ item, rate, onEdit, onDelete, t, compact = false }) => (
+  <div style={{
+    padding: compact ? "10px 12px" : "12px 14px",
+    background:t.surfaceHover, borderRadius:12,
+    border:`1px solid ${t.border}`,
+    display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8
+  }}>
+    <div style={{ flex:1, minWidth:0 }}>
+      {!compact && (
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, flexWrap:"wrap" }}>
+          <span style={{ fontSize:11, fontWeight:700, color:t.accentTxt, background:t.accentBg, padding:"2px 8px", borderRadius:6 }}>
+            {fmtDateDisplay(item.date)}
+          </span>
+          {item.tipUSD > 0 && (
+            <span style={{ fontSize:11, fontWeight:700, color:t.pinkTxt, background:t.pinkBg, padding:"2px 8px", borderRadius:6 }}>💰 tip</span>
+          )}
+        </div>
+      )}
+      <div style={{ fontSize: compact ? 13 : 15, fontWeight:900, color:t.text }}>{fmtUSD(item.totalUSD)}</div>
+      <div style={{ fontSize:11, color:t.textMuted, fontWeight:600 }}>{fmtVND(toVND(item.totalUSD, rate))}</div>
+      {item.tipUSD > 0 && (
+        <div style={{ fontSize:11, color:t.pink, marginTop:2, fontWeight:700 }}>
+          lương {fmtUSD(item.wageUSD)} + tip {fmtUSD(item.tipUSD)}
+        </div>
+      )}
+      {item.note && <div style={{ fontSize:12, color:t.textSub, marginTop:3 }}>{item.note}</div>}
+    </div>
+    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+      <button
+        onClick={() => onEdit(item)}
+        title="Chỉnh sửa"
+        style={{ background:t.accentBg, color:t.accent, border:"none", borderRadius:8, padding:"7px 8px", cursor:"pointer" }}>
+        <Icon name="edit" size={14} color={t.accent} />
+      </button>
+      <button
+        onClick={() => onDelete(item.id)}
+        title="Xoá"
+        style={{ background:t.redBg, color:t.red, border:"none", borderRadius:8, padding:"7px 8px", cursor:"pointer" }}>
+        <Icon name="trash" size={14} color={t.red} />
+      </button>
+    </div>
+  </div>
+);
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-const StatCard = ({ label, usd, rate, icon, col, bg, txt }) => (
+const StatCard = ({ label, usd, rate, icon, col, bg }) => (
   <div style={{ background:"var(--surface,#fff)", borderRadius:16, padding:"16px 18px", border:"1px solid var(--border,#e2e8f0)", display:"flex", flexDirection:"column", gap:6 }}>
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
       <span style={{ fontSize:11, color:col, fontWeight:700, textTransform:"uppercase", letterSpacing:.6 }}>{label}</span>
@@ -208,7 +408,7 @@ const StatCard = ({ label, usd, rate, icon, col, bg, txt }) => (
       </span>
     </div>
     <div style={{ fontSize:18, fontWeight:900, color:"var(--text,#0f172a)", letterSpacing:-.5 }}>{fmtUSD(usd)}</div>
-    <div style={{ fontSize:11, color:"var(--textMuted,#94a3b8)", fontWeight:600 }}>{fmtVND(toVND(usd,rate))}</div>
+    <div style={{ fontSize:11, color:"var(--textMuted,#94a3b8)", fontWeight:600 }}>{fmtVND(toVND(usd, rate))}</div>
   </div>
 );
 
@@ -218,10 +418,9 @@ const DashboardCards = ({ items, rate, t }) => {
   const todayItems = items.filter(i=>i.date===tday);
   const weekItems = items.filter(i=>{ const d=new Date(i.date+"T00:00:00"); return d>=wS&&d<=wE; });
   const monthItems = items.filter(i=>{ const [y,m]=i.date.split("-"); return +y===now.getFullYear()&&+m===now.getMonth()+1; });
-  const days=[...new Set(items.map(i=>i.date))].length;
-  const avg=days>0?sumUSD(items)/days:0;
-  const totalTip=items.reduce((s,i)=>s+(i.tipUSD||0),0);
-
+  const days = [...new Set(items.map(i=>i.date))].length;
+  const avg = days > 0 ? sumUSD(items)/days : 0;
+  const totalTip = items.reduce((s,i)=>s+(i.tipUSD||0), 0);
   return (
     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(148px,1fr))", gap:10 }}>
       <StatCard label="Hôm nay" usd={sumUSD(todayItems)} rate={rate} icon="sun" col={t.amber} bg={t.amberBg} />
@@ -245,23 +444,20 @@ const IncomeForm = ({ onAdd, rate, toast, t }) => {
   const [note, setNote] = useState("");
   const [err, setErr] = useState({});
 
-  const toUSDval = (val, cur) => cur==="VND" ? toUSD(+val, rate) : +val;
-
-  const totalUSD = useMemo(()=>{
-    const w = +wage>0 ? toUSDval(wage,wageCur) : 0;
-    const tp = showTip && +tip>0 ? toUSDval(tip,tipCur) : 0;
-    return w+tp;
-  },[wage,wageCur,tip,tipCur,showTip,rate]);
+  const wageUSDprev = +wage > 0 ? toUSDval(wage, wageCur, rate) : 0;
+  const tipUSDprev = showTip && +tip > 0 ? toUSDval(tip, tipCur, rate) : 0;
+  const totalUSD = wageUSDprev + tipUSDprev;
 
   const submit = () => {
-    const errs={};
-    if (!date) errs.date="Chọn ngày";
-    if (!wage||isNaN(+wage)||+wage<=0) errs.wage="Nhập số tiền hợp lệ";
-    if (showTip&&tip&&(isNaN(+tip)||+tip<0)) errs.tip="Tip không hợp lệ";
+    const errs = {};
+    if (!date) errs.date = "Chọn ngày";
+    if (!wage || isNaN(+wage) || +wage <= 0) errs.wage = "Nhập số tiền hợp lệ";
+    if (showTip && tip && (isNaN(+tip) || +tip < 0)) errs.tip = "Tip không hợp lệ";
     if (Object.keys(errs).length) { setErr(errs); return; }
-    const wageUSD=toUSDval(wage,wageCur), tipUSD=showTip&&tip?toUSDval(tip,tipCur):0;
-    onAdd({ id:uid(), date, wageUSD, wageCur, wageOrig:+wage, tipUSD, tipCur, tipOrig:tip?+tip:0,
-      totalUSD:wageUSD+tipUSD, exchangeRate:rate, note:note.trim(), createdAt:new Date().toISOString() });
+    const wU = toUSDval(wage, wageCur, rate);
+    const tU = showTip && tip ? toUSDval(tip, tipCur, rate) : 0;
+    onAdd({ id:uid(), date, wageUSD:wU, wageCur, wageOrig:+wage, tipUSD:tU, tipCur, tipOrig:tip?+tip:0,
+      totalUSD:wU+tU, exchangeRate:rate, note:note.trim(), createdAt:new Date().toISOString() });
     setWage(""); setTip(""); setNote(""); setShowTip(false); setErr({});
     toast("Đã thêm thu nhập thành công!");
   };
@@ -274,15 +470,11 @@ const IncomeForm = ({ onAdd, rate, toast, t }) => {
         <Icon name="plus-circle" size={18} color={t.accent} />Thêm thu nhập
       </h2>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-
-        {/* Date */}
         <div>
           <label style={lbl}>Ngày làm việc</label>
           <DatePicker value={date} onChange={setDate} t={t} />
           {err.date && <p style={{ color:t.red, fontSize:12, margin:"4px 0 0" }}>{err.date}</p>}
         </div>
-
-        {/* Wage */}
         <div>
           <label style={lbl}>Lương / Thu nhập</label>
           <div style={{ display:"flex", gap:8 }}>
@@ -292,23 +484,20 @@ const IncomeForm = ({ onAdd, rate, toast, t }) => {
             <CurrencyToggle value={wageCur} onChange={setWageCur} t={t} />
           </div>
           {err.wage && <p style={{ color:t.red, fontSize:12, margin:"4px 0 0" }}>{err.wage}</p>}
-          {wage && +wage>0 && <p style={{ color:t.textMuted, fontSize:12, margin:"4px 0 0" }}>
-            ≈ {wageCur==="USD" ? fmtVND(toVND(+wage,rate)) : fmtUSD(toUSD(+wage,rate))}
+          {wage && +wage > 0 && <p style={{ color:t.textMuted, fontSize:12, margin:"4px 0 0" }}>
+            ≈ {wageCur==="USD" ? fmtVND(toVND(+wage, rate)) : fmtUSD(toUSD(+wage, rate))}
           </p>}
         </div>
-
-        {/* Tip section */}
         <div>
           <button onClick={()=>{setShowTip(s=>!s);setTip("");}} style={{
             display:"flex", alignItems:"center", gap:8, background:"none", border:`1.5px solid ${showTip?t.pink:t.border}`,
             cursor:"pointer", color:showTip?t.pink:t.textSub, fontSize:13, fontWeight:700,
             padding:"10px 14px", borderRadius:12, fontFamily:"inherit", width:"100%",
-            transition:"all .15s", justifyContent:"center", backgroundColor: showTip?t.pinkBg:"transparent"
+            transition:"all .15s", justifyContent:"center", backgroundColor:showTip?t.pinkBg:"transparent"
           }}>
             <Icon name={showTip?"coin":"circle-plus"} size={16} color={showTip?t.pink:t.textMuted} />
             {showTip ? "Ẩn ô tip" : "Thêm tiền tip (tùy chọn)"}
           </button>
-
           {showTip && (
             <div style={{ marginTop:10, padding:"14px", background:t.pinkBg, borderRadius:14, border:`1.5px solid ${t.pink}50` }}>
               <label style={{ ...lbl, color:t.pink }}>Tiền tip nhận được</label>
@@ -319,14 +508,12 @@ const IncomeForm = ({ onAdd, rate, toast, t }) => {
                 <CurrencyToggle value={tipCur} onChange={setTipCur} t={t} />
               </div>
               {err.tip && <p style={{ color:t.red, fontSize:12, margin:"4px 0 0" }}>{err.tip}</p>}
-              {tip && +tip>0 && <p style={{ color:t.pink, fontSize:12, margin:"4px 0 0", fontWeight:600 }}>
-                ≈ {tipCur==="USD" ? fmtVND(toVND(+tip,rate)) : fmtUSD(toUSD(+tip,rate))}
+              {tip && +tip > 0 && <p style={{ color:t.pink, fontSize:12, margin:"4px 0 0", fontWeight:600 }}>
+                ≈ {tipCur==="USD" ? fmtVND(toVND(+tip, rate)) : fmtUSD(toUSD(+tip, rate))}
               </p>}
             </div>
           )}
         </div>
-
-        {/* Note */}
         <div>
           <label style={lbl}>Ghi chú (không bắt buộc)</label>
           <input type="text" placeholder="ca sáng, bonus, thêm giờ..." value={note}
@@ -334,18 +521,15 @@ const IncomeForm = ({ onAdd, rate, toast, t }) => {
             style={{ width:"100%", padding:"11px 14px", borderRadius:12, border:`1.5px solid ${t.border}`,
               background:t.inputBg, color:t.text, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box" }} />
         </div>
-
-        {/* Preview */}
         {totalUSD > 0 && (
           <div style={{ padding:"12px 14px", background:t.greenBg, borderRadius:12, border:`1.5px solid ${t.green}40`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <span style={{ fontSize:12, color:t.greenTxt, fontWeight:700 }}>Tổng sẽ thêm</span>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontSize:16, fontWeight:900, color:t.green }}>{fmtUSD(totalUSD)}</div>
-              <div style={{ fontSize:11, color:t.greenTxt, fontWeight:600 }}>{fmtVND(toVND(totalUSD,rate))}</div>
+              <div style={{ fontSize:11, color:t.greenTxt, fontWeight:600 }}>{fmtVND(toVND(totalUSD, rate))}</div>
             </div>
           </div>
         )}
-
         <button onClick={submit} style={{
           padding:"13px", background:t.accent, color:"#fff", border:"none",
           borderRadius:12, fontSize:15, fontWeight:800, cursor:"pointer",
@@ -359,7 +543,7 @@ const IncomeForm = ({ onAdd, rate, toast, t }) => {
 };
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
-const IncomeCalendar = ({ items, rate, t }) => {
+const IncomeCalendar = ({ items, rate, onEdit, onDelete, t }) => {
   const [sel, setSel] = useState(todayStr());
   const now = new Date();
   const [viewY, setViewY] = useState(now.getFullYear());
@@ -369,7 +553,7 @@ const IncomeCalendar = ({ items, rate, t }) => {
   const dim = new Date(viewY, viewM+1, 0).getDate();
   const fdow = (() => { const d=new Date(viewY,viewM,1).getDay(); return d===0?6:d-1; })();
   const todayS = todayStr();
-  const selItems = byDate[sel]||[];
+  const selItems = byDate[sel] || [];
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -407,10 +591,10 @@ const IncomeCalendar = ({ items, rate, t }) => {
 
       <div style={{ background:t.surface, borderRadius:20, padding:"16px 14px", border:`1px solid ${t.border}`, boxShadow:t.shadow }}>
         <div style={{ fontWeight:800, fontSize:13, color:t.textSub, marginBottom:10 }}>{fmtDateDisplay(sel)}</div>
-        {selItems.length===0 ? (
+        {selItems.length === 0 ? (
           <div style={{ textAlign:"center", padding:"28px 0", color:t.textMuted }}>
             <Icon name="inbox" size={28} style={{ display:"block", margin:"0 auto 8px" }} />
-            Không có thu nhập
+            Không có thu nhập ngày này
           </div>
         ) : (
           <>
@@ -418,19 +602,14 @@ const IncomeCalendar = ({ items, rate, t }) => {
               <span style={{ fontSize:12, color:t.greenTxt, fontWeight:700 }}>Tổng ngày này</span>
               <div style={{ textAlign:"right" }}>
                 <div style={{ fontSize:15, fontWeight:900, color:t.green }}>{fmtUSD(sumUSD(selItems))}</div>
-                <div style={{ fontSize:11, color:t.greenTxt }}>{fmtVND(toVND(sumUSD(selItems),rate))}</div>
+                <div style={{ fontSize:11, color:t.greenTxt }}>{fmtVND(toVND(sumUSD(selItems), rate))}</div>
               </div>
             </div>
-            {selItems.map(i=>(
-              <div key={i.id} style={{ padding:"10px 0", borderBottom:`1px solid ${t.border}`, display:"flex", justifyContent:"space-between" }}>
-                <div>
-                  <div style={{ fontSize:13, fontWeight:800, color:t.text }}>{fmtUSD(i.wageUSD)} lương</div>
-                  {i.tipUSD>0&&<div style={{ fontSize:12, color:t.pink, fontWeight:700 }}>+ {fmtUSD(i.tipUSD)} tip</div>}
-                  {i.note&&<div style={{ fontSize:11, color:t.textMuted, marginTop:2 }}>{i.note}</div>}
-                </div>
-                <div style={{ fontWeight:900, color:t.green, fontSize:13 }}>{fmtUSD(i.totalUSD)}</div>
-              </div>
-            ))}
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {selItems.map(item => (
+                <IncomeCard key={item.id} item={item} rate={rate} onEdit={onEdit} onDelete={onDelete} t={t} compact />
+              ))}
+            </div>
           </>
         )}
       </div>
@@ -439,9 +618,11 @@ const IncomeCalendar = ({ items, rate, t }) => {
 };
 
 // ─── History ──────────────────────────────────────────────────────────────────
-const IncomeTable = ({ items, rate, onDelete, onDeleteAll, toast, t }) => {
+const IncomeTable = ({ items, rate, onEdit, onDelete, onDeleteAll, toast, t }) => {
   const [search, setSearch] = useState("");
-  const filtered = items.filter(i=>i.note?.toLowerCase().includes(search.toLowerCase())||i.date.includes(search)).sort((a,b)=>b.date.localeCompare(a.date));
+  const filtered = items
+    .filter(i => i.note?.toLowerCase().includes(search.toLowerCase()) || i.date.includes(search))
+    .sort((a,b) => b.date.localeCompare(a.date));
 
   return (
     <div style={{ background:t.surface, borderRadius:20, padding:"18px 14px", border:`1px solid ${t.border}`, boxShadow:t.shadow }}>
@@ -455,7 +636,7 @@ const IncomeTable = ({ items, rate, onDelete, onDeleteAll, toast, t }) => {
             <input placeholder="Tìm..." value={search} onChange={e=>setSearch(e.target.value)}
               style={{ padding:"7px 10px 7px 27px", borderRadius:10, border:`1.5px solid ${t.border}`, background:t.inputBg, color:t.text, fontSize:12, outline:"none", width:110, fontFamily:"inherit" }} />
           </div>
-          {items.length>0&&(
+          {items.length > 0 && (
             <button onClick={()=>{if(confirm("Xoá TOÀN BỘ dữ liệu?")){onDeleteAll();toast("Đã xoá toàn bộ","error");}}}
               style={{ padding:"7px 10px", background:t.redBg, color:t.red, border:"none", borderRadius:10, fontSize:12, cursor:"pointer", fontWeight:700, fontFamily:"inherit" }}>
               <Icon name="trash" size={13} />
@@ -464,30 +645,15 @@ const IncomeTable = ({ items, rate, onDelete, onDeleteAll, toast, t }) => {
         </div>
       </div>
 
-      {filtered.length===0 ? (
+      {filtered.length === 0 ? (
         <div style={{ textAlign:"center", padding:"44px 0", color:t.textMuted }}>
           <Icon name="inbox" size={32} style={{ display:"block", margin:"0 auto 10px" }} />
           Chưa có dữ liệu
         </div>
       ) : (
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-          {filtered.map(i=>(
-            <div key={i.id} style={{ padding:"12px 12px", background:t.surfaceHover, borderRadius:12, border:`1px solid ${t.border}`, display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:8 }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4, flexWrap:"wrap" }}>
-                  <span style={{ fontSize:11, fontWeight:700, color:t.accentTxt, background:t.accentBg, padding:"2px 8px", borderRadius:6 }}>{fmtDateDisplay(i.date)}</span>
-                  {i.tipUSD>0&&<span style={{ fontSize:11, fontWeight:700, color:t.pinkTxt, background:t.pinkBg, padding:"2px 8px", borderRadius:6 }}>💰 tip</span>}
-                </div>
-                <div style={{ fontSize:15, fontWeight:900, color:t.text }}>{fmtUSD(i.totalUSD)}</div>
-                <div style={{ fontSize:11, color:t.textMuted, fontWeight:600 }}>{fmtVND(toVND(i.totalUSD,rate))}</div>
-                {i.tipUSD>0&&<div style={{ fontSize:11, color:t.pink, marginTop:2, fontWeight:700 }}>lương {fmtUSD(i.wageUSD)} + tip {fmtUSD(i.tipUSD)}</div>}
-                {i.note&&<div style={{ fontSize:12, color:t.textSub, marginTop:3 }}>{i.note}</div>}
-              </div>
-              <button onClick={()=>{if(confirm("Xoá khoản này?")){onDelete(i.id);toast("Đã xoá","error");}}}
-                style={{ background:t.redBg, color:t.red, border:"none", borderRadius:8, padding:"7px 9px", cursor:"pointer", flexShrink:0 }}>
-                <Icon name="trash" size={14} color={t.red} />
-              </button>
-            </div>
+          {filtered.map(item => (
+            <IncomeCard key={item.id} item={item} rate={rate} onEdit={onEdit} onDelete={onDelete} t={t} />
           ))}
         </div>
       )}
@@ -536,7 +702,7 @@ const StatisticsChart = ({ items, rate, t }) => {
           <h3 style={{ margin:0, fontSize:13, fontWeight:800, color:t.textSub, textTransform:"uppercase", letterSpacing:.4 }}>Theo tháng</h3>
           <select value={filterY} onChange={e=>setFilterY(+e.target.value)}
             style={{ padding:"5px 10px", borderRadius:8, border:`1px solid ${t.border}`, background:t.inputBg, color:t.text, fontSize:12, fontFamily:"inherit" }}>
-            {[now.getFullYear()-1,now.getFullYear()].map(y=><option key={y}>{y}</option>)}
+            {[now.getFullYear()-1, now.getFullYear()].map(y=><option key={y}>{y}</option>)}
           </select>
         </div>
         <BarChart data={monthly} accent={t.accent} />
@@ -595,7 +761,7 @@ const Settings = ({ rate, setRate, items, setItems, toast, t }) => {
             <input type="file" accept=".json" onChange={importData} style={{ display:"none" }} />
           </label>
         </div>
-        <p style={{ fontSize:11, color:t.textMuted, margin:"10px 0 0" }}>Export định kỳ để không mất dữ liệu khi xoá cache trình duyệt.</p>
+        <p style={{ fontSize:11, color:t.textMuted, margin:"10px 0 0" }}>Export định kỳ để không mất dữ liệu khi xoá cache.</p>
       </div>
     </div>
   );
@@ -617,23 +783,38 @@ export default function App() {
   const [isDark, setIsDark] = useState(()=>localStorage.getItem(THEME_KEY)==="dark");
   const [tab, setTab] = useState("dashboard");
   const [toastData, setToastData] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
 
   useEffect(()=>{ localStorage.setItem(STORAGE_KEY,JSON.stringify(items)); },[items]);
   useEffect(()=>{ localStorage.setItem(THEME_KEY,isDark?"dark":"light"); },[isDark]);
 
   const t = isDark ? TH.dark : TH.light;
-  const toast = useCallback((msg,type="success")=>setToastData({msg,type,key:Date.now()}),[]);
-  const addItem = i=>setItems(p=>[i,...p]);
-  const delItem = id=>setItems(p=>p.filter(i=>i.id!==id));
-  const delAll = ()=>setItems([]);
+  const toast = useCallback((msg, type="success") => setToastData({msg,type,key:Date.now()}), []);
+  const addItem = i => setItems(p=>[i,...p]);
+  const delItem = id => {
+    if (confirm("Xoá khoản này?")) {
+      setItems(p=>p.filter(i=>i.id!==id));
+      toast("Đã xoá","error");
+    }
+  };
+  const editItem = (item) => setEditingItem(item);
+  const saveEdit = (updated) => {
+    setItems(p => p.map(i => i.id === updated.id ? updated : i));
+    setEditingItem(null);
+    toast("Đã lưu thay đổi!");
+  };
+  const delAll = () => setItems([]);
 
   const content = {
-    dashboard:<div style={{display:"flex",flexDirection:"column",gap:14}}><DashboardCards items={items} rate={rate} t={t}/><IncomeForm onAdd={addItem} rate={rate} toast={toast} t={t}/></div>,
-    add:<IncomeForm onAdd={addItem} rate={rate} toast={toast} t={t}/>,
-    calendar:<IncomeCalendar items={items} rate={rate} t={t}/>,
-    history:<IncomeTable items={items} rate={rate} onDelete={delItem} onDeleteAll={delAll} toast={toast} t={t}/>,
-    stats:<StatisticsChart items={items} rate={rate} t={t}/>,
-    settings:<Settings rate={rate} setRate={setRate} items={items} setItems={setItems} toast={toast} t={t}/>,
+    dashboard: <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <DashboardCards items={items} rate={rate} t={t}/>
+      <IncomeForm onAdd={addItem} rate={rate} toast={toast} t={t}/>
+    </div>,
+    add: <IncomeForm onAdd={addItem} rate={rate} toast={toast} t={t}/>,
+    calendar: <IncomeCalendar items={items} rate={rate} onEdit={editItem} onDelete={delItem} t={t}/>,
+    history: <IncomeTable items={items} rate={rate} onEdit={editItem} onDelete={delItem} onDeleteAll={delAll} toast={toast} t={t}/>,
+    stats: <StatisticsChart items={items} rate={rate} t={t}/>,
+    settings: <Settings rate={rate} setRate={setRate} items={items} setItems={setItems} toast={toast} t={t}/>,
   };
 
   return (
@@ -644,6 +825,7 @@ export default function App() {
         *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
         input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
         @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes slideUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
         button,input,select{font-family:inherit;}
         ::-webkit-scrollbar{height:3px;width:3px;}
         ::-webkit-scrollbar-thumb{background:${t.border};border-radius:4px;}
@@ -675,7 +857,6 @@ export default function App() {
 
       {/* Content */}
       <div style={{ maxWidth:600, margin:"-24px auto 0", padding:"0 12px", position:"relative", zIndex:10 }}>
-        {/* Nav */}
         <div style={{
           background:t.navBg, borderRadius:16, padding:"4px",
           display:"flex", gap:2, overflowX:"auto", scrollbarWidth:"none",
@@ -698,6 +879,17 @@ export default function App() {
         </div>
         <div style={{ paddingBottom:36 }}>{content[tab]}</div>
       </div>
+
+      {/* Edit Modal */}
+      {editingItem && (
+        <EditModal
+          item={editingItem}
+          rate={rate}
+          onSave={saveEdit}
+          onClose={()=>setEditingItem(null)}
+          t={t}
+        />
+      )}
 
       {toastData && <Toast key={toastData.key} msg={toastData.msg} type={toastData.type} onClose={()=>setToastData(null)} t={t}/>}
     </div>
