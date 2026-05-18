@@ -1,16 +1,45 @@
-# React + Vite
+# GoMom Salary Tracker
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+App theo dõi thu nhập USD (web + iOS Capacitor), đã tích hợp Supabase để lưu cloud.
 
-Currently, two official plugins are available:
+## 1) Cấu hình Supabase
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Tạo project trên Supabase.
+2. Vào `SQL Editor`, chạy file [`supabase/schema.sql`](./supabase/schema.sql).
+3. Tạo file `.env` từ `.env.example`:
 
-## React Compiler
+```bash
+cp .env.example .env
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+4. Điền:
 
-## Expanding the ESLint configuration
+```env
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 2) Chạy local
+
+```bash
+npm install
+npm run dev
+```
+
+## 3) Deploy GitHub Pages
+
+```bash
+npm run deploy
+```
+
+## 4) iOS (Capacitor)
+
+```bash
+npm run ios:sync
+npm run ios:open
+```
+
+## Ghi chú quan trọng
+
+- App đang dùng Supabase **không đăng nhập**, nên mọi ai có app + key đều có thể đọc/ghi chung dữ liệu.
+- Nếu sau này cần riêng tư theo từng người dùng, nên thêm Supabase Auth + RLS theo `user_id`.

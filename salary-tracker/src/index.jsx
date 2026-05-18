@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { deleteIncomeItems, fetchIncomeItems, syncLocalItemsToCloud, upsertIncomeItem } from "./lib/incomeCloud";
+import { isSupabaseConfigured } from "./lib/supabaseClient";
 
 const STORAGE_KEY = "salary_items_usd";
 const THEME_KEY = "salary_theme";
@@ -415,7 +417,7 @@ const Stats = ({ items }) => {
   );
 };
 
-const Settings = ({ items, setItems, showToast }) => {
+const Settings = ({ items, setItems, showToast, cloudEnabled, cloudBusy, onReloadCloud, onSyncCloud }) => {
   const exportJson = () => {
     const blob = new Blob([JSON.stringify({ items, exportedAt: new Date().toISOString() }, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
@@ -436,6 +438,9 @@ const Settings = ({ items, setItems, showToast }) => {
         if (!Array.isArray(data.items)) throw new Error("invalid");
         setItems(data.items);
         showToast("Import thành công");
+        if (cloudEnabled) {
+          void onSyncCloud(data.items);
+        }
       } catch {
         showToast("File không hợp lệ", "error");
       }
@@ -446,6 +451,13 @@ const Settings = ({ items, setItems, showToast }) => {
   return (
     <div className="panel stack">
       <h3 className="section-title"><Icon name="settings" size={16} /> Dữ liệu</h3>
+      <p className="muted">{cloudEnabled ? "Supabase: Đã cấu hình" : "Supabase: Chưa cấu hình (đang lưu local)"}</p>
+      <button className="subtle" onClick={() => void onReloadCloud()} disabled={!cloudEnabled || cloudBusy}>
+        Tải lại từ cloud
+      </button>
+      <button className="subtle" onClick={() => void onSyncCloud()} disabled={!cloudEnabled || cloudBusy}>
+        Đồng bộ lên cloud
+      </button>
       <button onClick={exportJson}>Export JSON</button>
       <label className="file-btn">
         Import JSON
@@ -511,8 +523,48 @@ export default function App() {
   const [themeName, setThemeName] = useState(localStorage.getItem(THEME_KEY) || "light");
   const [toast, setToast] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const cloudBootstrappedRef = useRef(false);
 
   const theme = THEMES[themeName];
+
+  const showToast = (text, type = "ok") => setToast({ text, type, key: Date.now() });
+
+  const reloadFromCloud = async (notify = true, force = true) => {
+    if (!isSupabaseConfigured) return false;
+    setCloudBusy(true);
+    try {
+      const remoteItems = await fetchIncomeItems();
+      setItems((prev) => {
+        if (!force && remoteItems.length === 0 && prev.length > 0) {
+          return prev;
+        }
+        return remoteItems;
+      });
+      if (notify) showToast("Đã tải dữ liệu từ cloud");
+      return true;
+    } catch {
+      if (notify) showToast("Không tải được dữ liệu cloud", "error");
+      return false;
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
+  const syncCloud = async (sourceItems = items, notify = true) => {
+    if (!isSupabaseConfigured) return false;
+    setCloudBusy(true);
+    try {
+      const result = await syncLocalItemsToCloud(sourceItems);
+      if (notify) showToast(`Đã đồng bộ cloud (${result.uploaded} khoản)`);
+      return true;
+    } catch {
+      if (notify) showToast("Đồng bộ cloud thất bại", "error");
+      return false;
+    } finally {
+      setCloudBusy(false);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
@@ -522,29 +574,74 @@ export default function App() {
     localStorage.setItem(THEME_KEY, themeName);
   }, [themeName]);
 
-  const showToast = (text, type = "ok") => setToast({ text, type, key: Date.now() });
+  useEffect(() => {
+    if (!isSupabaseConfigured || cloudBootstrappedRef.current) return;
+    cloudBootstrappedRef.current = true;
+    void reloadFromCloud(false, false);
+  }, []);
 
-  const addItem = (entry) => {
+  const addItem = async (entry) => {
     setItems((prev) => [entry, ...prev]);
-    showToast("Đã thêm khoản thu");
+    if (!isSupabaseConfigured) {
+      showToast("Đã thêm khoản thu");
+      return;
+    }
+
+    try {
+      await upsertIncomeItem(entry);
+      showToast("Đã thêm khoản thu");
+    } catch {
+      showToast("Đã lưu trên máy, cloud đang lỗi", "error");
+    }
   };
 
-  const deleteItem = (id) => {
+  const deleteItem = async (id) => {
     if (!confirm("Xóa khoản này?")) return;
     setItems((prev) => prev.filter((i) => i.id !== id));
-    showToast("Đã xóa", "error");
+    if (!isSupabaseConfigured) {
+      showToast("Đã xóa", "error");
+      return;
+    }
+
+    try {
+      await deleteIncomeItems([id]);
+      showToast("Đã xóa", "error");
+    } catch {
+      showToast("Đã xóa trên máy, cloud đang lỗi", "error");
+    }
   };
 
-  const saveEdit = (updated) => {
+  const saveEdit = async (updated) => {
     setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     setEditing(null);
-    showToast("Đã cập nhật");
+    if (!isSupabaseConfigured) {
+      showToast("Đã cập nhật");
+      return;
+    }
+
+    try {
+      await upsertIncomeItem(updated);
+      showToast("Đã cập nhật");
+    } catch {
+      showToast("Đã cập nhật trên máy, cloud đang lỗi", "error");
+    }
   };
 
-  const deleteAll = () => {
+  const deleteAll = async () => {
     if (!confirm("Xóa toàn bộ dữ liệu?")) return;
+    const existingIds = items.map((item) => item.id);
     setItems([]);
-    showToast("Đã xóa toàn bộ", "error");
+    if (!isSupabaseConfigured) {
+      showToast("Đã xóa toàn bộ", "error");
+      return;
+    }
+
+    try {
+      await deleteIncomeItems(existingIds);
+      showToast("Đã xóa toàn bộ", "error");
+    } catch {
+      showToast("Đã xóa trên máy, cloud đang lỗi", "error");
+    }
   };
 
   const views = {
@@ -558,7 +655,17 @@ export default function App() {
     calendar: <Calendar items={items} onEdit={setEditing} onDelete={deleteItem} />,
     history: <History items={items} onEdit={setEditing} onDelete={deleteItem} onDeleteAll={deleteAll} />,
     stats: <Stats items={items} />,
-    settings: <Settings items={items} setItems={setItems} showToast={showToast} />,
+    settings: (
+      <Settings
+        items={items}
+        setItems={setItems}
+        showToast={showToast}
+        cloudEnabled={isSupabaseConfigured}
+        cloudBusy={cloudBusy}
+        onReloadCloud={reloadFromCloud}
+        onSyncCloud={syncCloud}
+      />
+    ),
   };
 
   return (
